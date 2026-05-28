@@ -1,0 +1,45 @@
+name: 同步 Mi8G3-Unlocker Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: 下载上游最新 Release 并发布
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 同步 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_REPO: Linuxoid-cn/Mi8G3-Unlocker
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+
+          TAG="$(gh release view --repo "$UPSTREAM_REPO" --json tagName --jq '.tagName')"
+          NAME="$(gh release view --repo "$UPSTREAM_REPO" --json name --jq '.name // .tagName')"
+
+          gh release view "$TAG" >/dev/null 2>&1 && gh release delete "$TAG" --yes --cleanup-tag || true
+
+          gh release view --repo "$UPSTREAM_REPO" --json assets \
+            --jq '.assets[] | [.name, .url] | @tsv' |
+          while IFS=$'\t' read -r FILE URL; do
+            echo "下载: $FILE"
+            gh api "$URL" \
+              -H "Accept: application/octet-stream" \
+              > "dist/$FILE"
+          done
+
+          if [ -z "$(find dist -type f -print -quit)" ]; then
+            echo "上游最新 Release 没有可下载附件"
+            exit 1
+          fi
+
+          gh release create "$TAG" dist/* \
+            --title "$NAME" \
+            --notes "同步自 https://github.com/${UPSTREAM_REPO}/releases/tag/${TAG}"
